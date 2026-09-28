@@ -28,8 +28,8 @@ from {BENCH}.TXN_CLUSTERED t
 join {BENCH}.TXN_CLUSTERED p
   on p.account_id = t.account_id
  and p.txn_ts <= t.txn_ts
- and p.txn_date between '2024-03-01' and '2024-03-31'
-where t.txn_date between '2024-03-01' and '2024-03-31'
+ and p.txn_date between '2024-01-01' and '2024-12-31'
+where t.txn_date between '2024-01-01' and '2024-12-31'
   and t.is_posted and p.is_posted
 group by t.account_id, t.txn_id
 """
@@ -39,7 +39,7 @@ select account_id, txn_id,
        sum(signed_amount_eur) over (partition by account_id order by txn_ts, txn_id
                                     rows between unbounded preceding and current row) as running_total_eur
 from {BENCH}.TXN_CLUSTERED
-where txn_date between '2024-03-01' and '2024-03-31'
+where txn_date between '2024-01-01' and '2024-12-31'
   and is_posted
 """
 
@@ -129,7 +129,7 @@ def experiments(sample_txn_id: str) -> list[Experiment]:
         ),
         Experiment(
             "running_balance_rewrite",
-            "Running balance for one month: triangular self join versus a window function.",
+            "Running balance per account over one year: triangular self join versus a window function.",
             [
                 Variant("self join", RUNNING_BALANCE_SELF_JOIN),
                 Variant("window function", RUNNING_BALANCE_WINDOW),
@@ -285,14 +285,13 @@ def _render(results: list[RunResult], exps: list[Experiment], rows: int, depth: 
             "",
             exp.question,
             "",
-            "| Variant | Warehouse | Cold (s) | Warm (s) | MB scanned | Partitions scanned | Est. credits (warm) |",
-            "|---|---|---:|---:|---:|---:|---:|",
+            "| Variant | Warehouse | Cold (s) | Warm (s) | Partitions scanned | Est. credits (warm) |",
+            "|---|---|---:|---:|---:|---:|",
         ]
         for r in rs:
             parts = "n/a" if r.partitions_total is None else f"{r.partitions_scanned:,} / {r.partitions_total:,}"
             out.append(
-                f"| {r.variant} | {r.size} | {r.cold_s:.2f} | {r.warm_median_s:.2f} | "
-                f"{fmt(r.bytes_scanned_mb, ',.0f')} | {parts} | {r.est_credits:.5f} |"
+                f"| {r.variant} | {r.size} | {r.cold_s:.2f} | {r.warm_median_s:.2f} | {parts} | {r.est_credits:.5f} |"
             )
     out += [
         "",
