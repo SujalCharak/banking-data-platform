@@ -14,19 +14,29 @@
 {%- endmacro %}
 
 {% macro default__try_parse_timestamp(expr, formats) -%}
-    coalesce(
-    {%- for fmt in formats %}
-        try_to_timestamp_ntz({{ expr }}, '{{ bank_platform.to_snowflake_format(fmt) }}'){{ "," if not loop.last }}
-    {%- endfor %}
-    )
+    {%- set parts = [] -%}
+    {%- for fmt in formats -%}
+        {%- do parts.append("try_to_timestamp_ntz(" ~ expr ~ ", '" ~ bank_platform.to_snowflake_format(fmt) ~ "')") -%}
+    {%- endfor -%}
+    {{ bank_platform.first_non_null(parts) }}
 {%- endmacro %}
 
 {% macro duckdb__try_parse_timestamp(expr, formats) -%}
-    coalesce(
-    {%- for fmt in formats %}
-        try_strptime({{ expr }}, '{{ fmt }}'){{ "," if not loop.last }}
-    {%- endfor %}
-    )
+    {%- set parts = [] -%}
+    {%- for fmt in formats -%}
+        {%- do parts.append("try_strptime(" ~ expr ~ ", '" ~ fmt ~ "')") -%}
+    {%- endfor -%}
+    {{ bank_platform.first_non_null(parts) }}
+{%- endmacro %}
+
+
+{% macro first_non_null(expressions) -%}
+    {#- Snowflake's coalesce needs at least two arguments. -#}
+    {%- if expressions | length == 1 -%}
+        {{ expressions[0] }}
+    {%- else -%}
+        coalesce({{ expressions | join(', ') }})
+    {%- endif -%}
 {%- endmacro %}
 
 

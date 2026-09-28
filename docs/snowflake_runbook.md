@@ -8,7 +8,7 @@ You need:
 * A Snowflake account with ACCOUNTADMIN. A trial works.
   * Choose **Enterprise** edition if you want search optimization and masking.
   * Everything else works on Standard.
-* Python 3.10 or newer and `openssl`.
+* Python 3.10 to 3.13 and `openssl`. dbt does not support 3.14 yet.
 
 ## 1. Install
 

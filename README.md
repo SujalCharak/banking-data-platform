@@ -164,7 +164,7 @@ Snowflake benchmark and cost numbers come from a real account. `bankdp benchmark
 ## Run it locally
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate    # Python 3.10 to 3.13
 pip install -e ".[dev]"
 bankdp run-local                        # generate, load, build, check incremental, validate
 ```
