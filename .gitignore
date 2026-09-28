@@ -4,9 +4,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-data/
-data_*/
-warehouse/
+/data/
+/data_*/
+/warehouse/
 
 dbt/target/
 dbt/logs/
