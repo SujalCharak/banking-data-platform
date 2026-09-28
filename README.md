@@ -119,7 +119,7 @@ It also includes three kinds of source change and gap:
 
 It also plants 47 AML cases: 12 structuring, 15 velocity bursts and 20 amount outliers.
 
-## Results
+## Results on DuckDB
 
 From `bankdp run-local` at full size (about 3 minutes on a 2 core machine). The output is in [docs/validation_report.md](docs/validation_report.md).
 
@@ -159,7 +159,43 @@ After the second batch, incremental builds matched a full rebuild exactly:
 * 2,615,637 daily balances.
 * 2,860 quarantined rows.
 
-Snowflake benchmark and cost numbers come from a real account. `bankdp benchmark` writes them to `docs/benchmark_results.md`, and `bankdp cost-report` writes `docs/cost_report.md`.
+## Results on Snowflake
+
+Run on a Snowflake Enterprise trial (AWS US West) with the same seeded data.
+
+* **Loading:** 370 transaction files and 2,813,677 rows, with zero load errors. After the first batch, the row count for every entity matched the source files exactly.
+* **dbt:** all 98 checks pass after both load batches. The second build merged only the new rows, and rebuilt balances forward from the earliest late date.
+* **Reconciliation:** `SP_RECONCILE_TRANSACTIONS` checked RAW against the fact table for every day of the year, and all 365 days passed.
+* **Validation:** every ground truth check and every AML result matches the DuckDB run exactly ([docs/validation_report_snowflake.md](docs/validation_report_snowflake.md)).
+
+**A bug only Snowflake could show.** The first Snowflake validation counted 58,035 late arrivals instead of 55,550.
+* **Cause:** the pipeline decided which delivery of a resent transaction came first by load time. Locally, every file in a batch shares one load time, so the file name breaks the tie. On Snowflake, each file in a COPY gets its own scan time, so a resent copy was sometimes stamped before the original and counted as late.
+* **Why it mattered:** the same ordering picked the latest version of a transaction, so a real correction could have kept the old version.
+* **Fix:** deliveries are now ordered by the extract date in the file name. A unit test reproduces the Snowflake case.
+
+### Performance
+
+Measured on 111,980,440 rows on an XSMALL warehouse, with the result cache off. Full output is in [docs/benchmark_results.md](docs/benchmark_results.md).
+
+| Experiment | Before | After | Change |
+|---|---|---|---|
+| Running balance for a year: self join, then window function | 83.3 s | 2.5 s | 34x faster |
+| Monthly report: filter with `to_char(txn_date)`, then a date range | 3.32 s, 72 of 74 partitions | 0.22 s, 1 of 74 partitions | 15x faster |
+| Monthly report: unclustered, then clustered on `txn_date` | 48 of 48 partitions | 1 of 74 partitions | 98% of partitions pruned |
+| Monthly active accounts: exact, then approximate distinct | 2.16 s | 1.45 s | 33% faster |
+| Lookup by transaction id: no index, then search optimization | 0.57 s | 0.39 s | 32% faster |
+
+Warehouse sizing on a full history scan:
+
+| Warehouse | Warm time | Cost per run (credits) |
+|---|---:|---:|
+| XSMALL | 1.51 s | 0.00042 |
+| SMALL | 1.10 s | 0.00061 |
+| MEDIUM | 0.95 s | 0.00106 |
+
+Doubling the warehouse did not halve the time. 112M rows compress into only 48 micro partitions, which is too little work to spread across more nodes. MEDIUM cost 2.5 times as much as XSMALL for a 1.6 times speedup, so XSMALL is the right size for this workload.
+
+On tables this size, timings move by a few tenths of a second between runs. Partition counts are exact. Search optimization shows only a small gain because there are few partitions to skip; it pays off on much larger tables.
 
 ## Run it locally
 

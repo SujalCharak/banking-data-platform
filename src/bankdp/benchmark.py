@@ -79,7 +79,6 @@ class RunResult:
     size: str
     cold_s: float
     warm_median_s: float
-    bytes_scanned_mb: float | None
     partitions_scanned: int | None
     partitions_total: int | None
     query_ids: list[str] = field(default_factory=list)
@@ -167,19 +166,7 @@ def _cold_start(con) -> None:
     execute(con, f"alter warehouse {WAREHOUSE} resume if suspended")
 
 
-def _query_stats(con, query_id: str) -> tuple[float | None, int | None, int | None]:
-    bytes_mb = scanned = total = None
-    try:
-        hist = query_df(
-            con,
-            "select bytes_scanned from table(information_schema.query_history_by_session(result_limit => 1000)) "
-            "where query_id = %s",
-            (query_id,),
-        )
-        if not hist.empty:
-            bytes_mb = float(hist.iloc[0, 0]) / 1_000_000
-    except Exception as exc:
-        log.warning("query history unavailable for %s: %s", query_id, exc)
+def _pruning(con, query_id: str) -> tuple[int | None, int | None]:
     try:
         ops = query_df(
             con,
@@ -189,10 +176,10 @@ def _query_stats(con, query_id: str) -> tuple[float | None, int | None, int | No
             (query_id,),
         )
         if not ops.empty and ops.iloc[0, 1] is not None:
-            scanned, total = int(ops.iloc[0, 0]), int(ops.iloc[0, 1])
+            return int(ops.iloc[0, 0]), int(ops.iloc[0, 1])
     except Exception as exc:
         log.warning("operator stats unavailable for %s: %s", query_id, exc)
-    return bytes_mb, scanned, total
+    return None, None
 
 
 def _search_optimization_ready(con, timeout_s: int = 1200) -> bool:
@@ -239,14 +226,13 @@ def run_benchmarks(sql_dir: Path, report_path: Path, repeats: int = 3) -> list[R
                     start = time.perf_counter()
                     qids.append(execute(con, v.sql))
                     timings.append(time.perf_counter() - start)
-                mb, scanned, total = _query_stats(con, qids[0])
+                scanned, total = _pruning(con, qids[0])
                 result = RunResult(
                     exp.name,
                     v.label,
                     v.size,
                     timings[0],
                     statistics.median(timings[1:] or timings),
-                    mb,
                     scanned,
                     total,
                     qids,
