@@ -67,7 +67,7 @@ flowchart LR
 ### Testing and validation
 * **dbt tests:**
   * 69 data tests: built in, custom generic and singular.
-  * 4 unit tests: FX gap fill, SCD2 collapsing, the structuring window, and the velocity window across midnight.
+  * 5 unit tests: FX gap fill, SCD2 collapsing, the structuring window, the velocity window across midnight, and duplicate detection when a resent file is scanned before the original.
 * **Singular tests** check that:
   * every delivered row ends up in exactly one place (the fact table or quarantine);
   * every account's final balance equals its opening balance plus posted movements;

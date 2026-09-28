@@ -12,5 +12,5 @@ select
 from {{ ref('stg_bank__accounts') }}
 qualify row_number() over (
     partition by account_id
-    order by updated_at desc, _loaded_at desc, _source_row desc
+    order by updated_at desc, _source_file desc, _source_row desc
 ) = 1

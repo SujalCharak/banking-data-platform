@@ -15,7 +15,7 @@ with rows_received as (
         {{ try_parse_date('left(right(_source_file, 15), 8)', '%Y%m%d') }} as file_date,
         row_number() over (
             partition by txn_id
-            order by _loaded_at, _source_file, _source_row
+            order by _source_file, _source_row
         ) as occurrence
     from {{ ref('int_transactions__validated') }}
 

@@ -130,7 +130,7 @@ begin
               and q._source_row = p._source_row
         )
         qualify row_number() over (
-            partition by txn_id order by _loaded_at desc, _source_file desc, _source_row desc
+            partition by txn_id order by _source_file desc, _loaded_at desc, _source_row desc
         ) = 1
     ),
     source_side as (

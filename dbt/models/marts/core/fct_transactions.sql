@@ -23,12 +23,13 @@ with batch as (
 
 latest_version as (
 
-    -- a transaction delivered more than once keeps its most recently delivered version
+    -- a transaction delivered more than once keeps the version from the latest extract; file names carry the
+    -- extract date, while _loaded_at is per file scan time on Snowflake and can be out of order within one COPY
     select *
     from batch
     qualify row_number() over (
         partition by txn_id
-        order by _loaded_at desc, _source_file desc, _source_row desc
+        order by _source_file desc, _loaded_at desc, _source_row desc
     ) = 1
 
 ),

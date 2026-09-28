@@ -13,5 +13,5 @@ select
 from raw_rates
 qualify row_number() over (
     partition by raw_rates.rate_date, upper(trim(raw_rates.currency))
-    order by raw_rates._loaded_at desc, raw_rates._source_row desc
+    order by raw_rates._source_file desc, raw_rates._loaded_at desc, raw_rates._source_row desc
 ) = 1

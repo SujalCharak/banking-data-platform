@@ -4,7 +4,7 @@ with versions as (
     from {{ ref('stg_bank__customers') }}
     qualify row_number() over (
         partition by customer_id, updated_at
-        order by _loaded_at desc, _source_row desc
+        order by _source_file desc, _source_row desc
     ) = 1
 
 ),

@@ -92,7 +92,7 @@ dbt build --target prod --profiles-dir .
 cd ..
 ```
 
-Expect 97 passes and no failures.
+Expect 98 passes and no failures.
 
 The `prod` target writes to `ANALYTICS.CORE`, `ANALYTICS.FINANCE` and the other mart schemas. The `dev` target writes to schemas prefixed with `DEV_<DBT_DEV_SCHEMA_SUFFIX>`, so you can work without touching prod.
 
