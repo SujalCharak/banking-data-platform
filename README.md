@@ -164,7 +164,7 @@ After the second batch, incremental builds matched a full rebuild exactly:
 Run on a Snowflake Enterprise trial (AWS US West) with the same seeded data.
 
 * **Loading:** 370 transaction files and 2,813,677 rows, with zero load errors. After the first batch, the row count for every entity matched the source files exactly.
-* **dbt:** all 98 checks pass after both load batches. The second build merged only the new rows, and rebuilt balances forward from the earliest late date.
+* **dbt:** all 21 models, 2 seeds, the snapshot and 74 tests (69 data tests, 5 unit tests) pass after both load batches. The second build merged only the new rows, and rebuilt balances forward from the earliest late date.
 * **Reconciliation:** `SP_RECONCILE_TRANSACTIONS` checked RAW against the fact table for every day of the year, and all 365 days passed.
 * **Validation:** every ground truth check and every AML result matches the DuckDB run exactly ([docs/validation_report_snowflake.md](docs/validation_report_snowflake.md)).
 
