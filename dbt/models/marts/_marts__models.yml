@@ -1,0 +1,154 @@
+models:
+  - name: dim_date
+    description: Calendar from calendar_start to calendar_end.
+    columns:
+      - name: date_day
+        data_tests: [unique, not_null]
+
+  - name: dim_customer
+    description: Customer dimension, SCD type 2. Join on customer_id with a valid_from / valid_to range for point in time attributes.
+    columns:
+      - name: customer_version_key
+        data_tests: [unique, not_null]
+      - name: segment
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [RETAIL, PRIVATE, BUSINESS]
+      - name: risk_rating
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [LOW, MEDIUM, HIGH]
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: "valid_to is null or valid_to > valid_from"
+
+  - name: dim_account
+    description: Current state of every account.
+    columns:
+      - name: account_id
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_id
+      - name: account_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [CHECKING, SAVINGS, CREDIT_CARD]
+
+  - name: dim_merchant
+    description: Merchants with their reporting spend category.
+    columns:
+      - name: merchant_id
+        data_tests: [unique, not_null]
+
+  - name: fct_transactions
+    description: >
+      One row per unique transaction that passed validation. Incremental on load time,
+      merged on txn_id, clustered by txn_date on Snowflake. Amounts are in account
+      currency and in EUR at the daily reference rate.
+    columns:
+      - name: txn_id
+        data_tests: [unique, not_null]
+      - name: account_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_account')
+                field: account_id
+      - name: amount
+        data_tests:
+          - not_null
+          - within_range:
+              arguments:
+                min_value: 0.01
+      - name: fx_rate_to_eur
+        data_tests: [not_null]
+      - name: txn_category
+        data_tests: [not_null]
+      - name: merchant_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_merchant')
+                field: merchant_id
+      - name: warning_reason
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [MISSING_MERCHANT]
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: "{{ dbt.datediff('fx_rate_published_date', 'txn_date', 'day') }} <= {{ var('fx_max_staleness_days') }}"
+      - expression_is_true:
+          arguments:
+            expression: "txn_ts <= _loaded_at"
+
+  - name: fct_account_daily_balance
+    description: >
+      End of day balance per account, from the later of account opening and data start
+      until closure. Incremental runs rebuild only from the earliest newly loaded transaction date.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [account_id, balance_date]
+    columns:
+      - name: closing_balance
+        data_tests: [not_null]
+      - name: closing_balance_eur
+        data_tests: [not_null]
+
+  - name: rpt_monthly_customer_summary
+    description: Customer by month view of income, spend, flows and balances, with segment and risk rating as of month end.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [customer_id, month_start]
+    columns:
+      - name: segment
+        data_tests: [not_null]
+
+  - name: rpt_merchant_category_spend
+    description: Monthly card spend by category and merchant country, net of reversed payments.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [month_start, spend_category, merchant_country]
+
+  - name: rpt_aml_alerts
+    description: >
+      One row per AML alert. Structuring and velocity alerts group overlapping windows so a
+      burst of activity produces one alert, not one per transaction.
+    columns:
+      - name: alert_id
+        data_tests: [unique, not_null]
+      - name: customer_risk_rating_at_alert
+        data_tests: [not_null]
+      - name: severity
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [HIGH, MEDIUM, LOW]
+
+  - name: dq_rejected_transactions
+    description: Quarantine of rows that failed validation, kept with their raw values for investigation and replay.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [_source_file, _source_row]
+
+  - name: dq_transaction_file_summary
+    description: One row per delivered transaction file with volumes, duplicates, rejections by reason and late arrivals.
+    columns:
+      - name: source_file
+        data_tests: [unique, not_null]
+      - name: file_date
+        data_tests: [not_null]

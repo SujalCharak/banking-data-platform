@@ -1,0 +1,145 @@
+models:
+  - name: int_accounts__current
+    description: Latest version of every account.
+    columns:
+      - name: account_id
+        data_tests: [unique, not_null]
+
+  - name: int_customers__history
+    description: >
+      Customer history as SCD type 2 ranges built from the change feed. Versions that
+      repeat the previous attributes (for example, reformatted emails) are collapsed.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [customer_id, valid_from]
+    columns:
+      - name: customer_version_key
+        data_tests: [unique, not_null]
+
+  - name: int_transactions__validated
+    description: >
+      Every delivered transaction row with a rejection reason (hard failures, sent to
+      quarantine) or a warning reason (kept, but flagged).
+    columns:
+      - name: rejection_reason
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [MISSING_TXN_ID, MISSING_TIMESTAMP, INVALID_TIMESTAMP, INVALID_AMOUNT, NEGATIVE_AMOUNT,
+                         ZERO_AMOUNT, UNKNOWN_ACCOUNT, INVALID_DIRECTION, CURRENCY_MISMATCH]
+
+  - name: int_fx_rates__daily
+    description: One rate per currency per calendar day. Weekends and holidays carry the last published rate forward.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [rate_date, currency]
+    columns:
+      - name: rate_to_eur
+        data_tests: [not_null]
+
+  - name: int_aml__alert_transactions
+    description: Transactions that belong to an AML alert, with the rule that raised it.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [alert_id, txn_id]
+    columns:
+      - name: rule_code
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [STRUCTURING, VELOCITY, OUTLIER]
+
+unit_tests:
+  - name: fx_weekend_uses_friday_rate
+    model: int_fx_rates__daily
+    overrides:
+      vars:
+        fx_forward_fill_days: 0
+    given:
+      - input: ref('stg_bank__fx_rates')
+        rows:
+          - {rate_date: 2025-01-03, currency: USD, rate_to_eur: 0.92}
+          - {rate_date: 2025-01-06, currency: USD, rate_to_eur: 0.95}
+    expect:
+      rows:
+        - {rate_date: 2025-01-03, currency: USD, rate_to_eur: 0.92, published_date: 2025-01-03, is_carried_forward: false}
+        - {rate_date: 2025-01-04, currency: USD, rate_to_eur: 0.92, published_date: 2025-01-03, is_carried_forward: true}
+        - {rate_date: 2025-01-05, currency: USD, rate_to_eur: 0.92, published_date: 2025-01-03, is_carried_forward: true}
+        - {rate_date: 2025-01-06, currency: USD, rate_to_eur: 0.95, published_date: 2025-01-06, is_carried_forward: false}
+        - {rate_date: 2025-01-03, currency: EUR, rate_to_eur: 1, published_date: 2025-01-03, is_carried_forward: false}
+        - {rate_date: 2025-01-04, currency: EUR, rate_to_eur: 1, published_date: 2025-01-04, is_carried_forward: false}
+        - {rate_date: 2025-01-05, currency: EUR, rate_to_eur: 1, published_date: 2025-01-05, is_carried_forward: false}
+        - {rate_date: 2025-01-06, currency: EUR, rate_to_eur: 1, published_date: 2025-01-06, is_carried_forward: false}
+
+  - name: customer_history_ignores_noop_versions
+    model: int_customers__history
+    given:
+      - input: ref('stg_bank__customers')
+        rows:
+          - {customer_id: C1, email: a@x.com, risk_rating: LOW, updated_at: "2025-01-01 10:00:00", _loaded_at: "2025-01-02 00:00:00", _source_row: 1}
+          - {customer_id: C1, email: a@x.com, risk_rating: LOW, updated_at: "2025-02-01 10:00:00", _loaded_at: "2025-02-02 00:00:00", _source_row: 1}
+          - {customer_id: C1, email: a@x.com, risk_rating: HIGH, updated_at: "2025-03-01 10:00:00", _loaded_at: "2025-03-02 00:00:00", _source_row: 1}
+    expect:
+      rows:
+        - {customer_id: C1, risk_rating: LOW, valid_from: "2025-01-01 10:00:00", valid_to: "2025-03-01 10:00:00"}
+        - {customer_id: C1, risk_rating: HIGH, valid_from: "2025-03-01 10:00:00", valid_to: null}
+
+  - name: structuring_needs_three_deposits_in_24_hours
+    model: int_aml__alert_transactions
+    given:
+      - input: ref('fct_transactions')
+        rows:
+          - {txn_id: T1, account_id: A1, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 9500, txn_ts: "2025-03-01 22:00:00", txn_date: 2025-03-01}
+          - {txn_id: T2, account_id: A1, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 9400, txn_ts: "2025-03-02 09:00:00", txn_date: 2025-03-02}
+          - {txn_id: T3, account_id: A1, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 9900, txn_ts: "2025-03-02 17:00:00", txn_date: 2025-03-02}
+          - {txn_id: T4, account_id: A2, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 9500, txn_ts: "2025-03-01 10:00:00", txn_date: 2025-03-01}
+          - {txn_id: T5, account_id: A2, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 9500, txn_ts: "2025-03-01 12:00:00", txn_date: 2025-03-01}
+          - {txn_id: T6, account_id: A2, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 12000, txn_ts: "2025-03-01 14:00:00", txn_date: 2025-03-01}
+          - {txn_id: T7, account_id: A3, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 9500, txn_ts: "2025-03-01 08:00:00", txn_date: 2025-03-01}
+          - {txn_id: T8, account_id: A3, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 9500, txn_ts: "2025-03-01 18:00:00", txn_date: 2025-03-01}
+          - {txn_id: T9, account_id: A3, txn_type: CASH_DEPOSIT, is_posted: true, amount_eur: 9500, txn_ts: "2025-03-02 09:00:00", txn_date: 2025-03-02}
+    expect:
+      rows:
+        - {rule_code: STRUCTURING, account_id: A1, alert_anchor_txn_id: T3, txn_id: T1}
+        - {rule_code: STRUCTURING, account_id: A1, alert_anchor_txn_id: T3, txn_id: T2}
+        - {rule_code: STRUCTURING, account_id: A1, alert_anchor_txn_id: T3, txn_id: T3}
+
+  - name: velocity_needs_ten_card_attempts_in_an_hour
+    model: int_aml__alert_transactions
+    given:
+      - input: ref('fct_transactions')
+        rows:
+          - {txn_id: V0, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 23:30:00", txn_date: 2025-05-10}
+          - {txn_id: V1, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 23:35:00", txn_date: 2025-05-10}
+          - {txn_id: V2, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 23:40:00", txn_date: 2025-05-10}
+          - {txn_id: V3, account_id: A1, txn_type: CARD_PAYMENT, is_posted: false, amount_eur: 12.5, txn_ts: "2025-05-10 23:45:00", txn_date: 2025-05-10}
+          - {txn_id: V4, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 23:50:00", txn_date: 2025-05-10}
+          - {txn_id: V5, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 23:55:00", txn_date: 2025-05-10}
+          - {txn_id: V6, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-11 00:00:00", txn_date: 2025-05-11}
+          - {txn_id: V7, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-11 00:05:00", txn_date: 2025-05-11}
+          - {txn_id: V8, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-11 00:10:00", txn_date: 2025-05-11}
+          - {txn_id: V9, account_id: A1, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-11 00:15:00", txn_date: 2025-05-11}
+          - {txn_id: W0, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:00:00", txn_date: 2025-05-10}
+          - {txn_id: W1, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:05:00", txn_date: 2025-05-10}
+          - {txn_id: W2, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:10:00", txn_date: 2025-05-10}
+          - {txn_id: W3, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:15:00", txn_date: 2025-05-10}
+          - {txn_id: W4, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:20:00", txn_date: 2025-05-10}
+          - {txn_id: W5, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:25:00", txn_date: 2025-05-10}
+          - {txn_id: W6, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:30:00", txn_date: 2025-05-10}
+          - {txn_id: W7, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:35:00", txn_date: 2025-05-10}
+          - {txn_id: W8, account_id: A2, txn_type: CARD_PAYMENT, is_posted: true, amount_eur: 12.5, txn_ts: "2025-05-10 10:40:00", txn_date: 2025-05-10}
+    expect:
+      rows:
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V0}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V1}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V2}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V3}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V4}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V5}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V6}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V7}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V8}
+        - {rule_code: VELOCITY, account_id: A1, alert_anchor_txn_id: V9, txn_id: V9}

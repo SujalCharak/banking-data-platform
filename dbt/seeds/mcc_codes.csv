@@ -1,0 +1,19 @@
+mcc,mcc_description,spend_category
+5411,Grocery stores and supermarkets,Groceries
+5812,Restaurants,Dining
+5814,Fast food,Dining
+5541,Service stations,Transport
+4111,Commuter transport,Transport
+4121,Taxis and rideshare,Transport
+5311,Department stores,Shopping
+5651,Clothing stores,Shopping
+5732,Electronics stores,Shopping
+5912,Pharmacies,Health
+4814,Telecommunication services,Bills
+4900,Utilities,Bills
+5942,Book stores,Leisure
+7832,Cinemas,Leisure
+4511,Airlines,Travel
+7011,Hotels and lodging,Travel
+5200,Home supply stores,Home
+5999,Miscellaneous retail,Shopping

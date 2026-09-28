@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev,snowflake]"
+
+      - name: Lint
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      - name: Unit tests
+        run: pytest -q
+
+      - name: Parse dbt project for Snowflake
+        env:
+          SNOWFLAKE_ACCOUNT: ci
+          SNOWFLAKE_USER: ci
+          SNOWFLAKE_PRIVATE_KEY_PATH: /dev/null
+        run: dbt parse --project-dir dbt --profiles-dir dbt --target prod
+
+      - name: Build, check incremental and validate on DuckDB
+        run: bankdp run-local --customers 800 --days 120
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: docs/validation_report.md

@@ -1,0 +1,36 @@
+bank_platform:
+  target: "{{ env_var('DBT_TARGET', 'local') }}"
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('BANK_DUCKDB_PATH', '../warehouse/bank.duckdb') }}"
+      schema: main
+      threads: 4
+
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', '') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '') }}"
+      private_key_passphrase: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PASSPHRASE', '') }}"
+      role: BANK_TRANSFORMER
+      warehouse: BANK_TRANSFORM_WH
+      database: ANALYTICS
+      schema: "DEV_{{ env_var('DBT_DEV_SCHEMA_SUFFIX', 'ME') }}"
+      threads: 8
+      query_tag: bank_platform_dbt_dev
+      reuse_connections: true
+
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT', '') }}"
+      user: "{{ env_var('SNOWFLAKE_USER', '') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '') }}"
+      private_key_passphrase: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PASSPHRASE', '') }}"
+      role: BANK_TRANSFORMER
+      warehouse: BANK_TRANSFORM_WH
+      database: ANALYTICS
+      schema: PUBLIC
+      threads: 8
+      query_tag: bank_platform_dbt
+      reuse_connections: true

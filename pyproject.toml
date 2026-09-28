@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bankdp"
+version = "0.1.0"
+description = "Retail banking data platform on Snowflake and dbt"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "duckdb>=1.1",
+    "dbt-core~=1.11.0",
+    "dbt-duckdb~=1.11.0",
+]
+
+[project.optional-dependencies]
+snowflake = [
+    "snowflake-connector-python[pandas]>=3.12",
+    "dbt-snowflake~=1.11.0",
+    "cryptography>=42",
+]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+bankdp = "bankdp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

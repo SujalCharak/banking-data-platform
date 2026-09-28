@@ -1,0 +1,8 @@
+snapshots:
+  - name: snap_accounts
+    description: Account status history captured on every run, independent of the feed's own history.
+    relation: ref('int_accounts__current')
+    config:
+      unique_key: account_id
+      strategy: timestamp
+      updated_at: updated_at

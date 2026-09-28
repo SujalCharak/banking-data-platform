@@ -1,0 +1,15 @@
+seeds:
+  - name: mcc_codes
+    description: Merchant category codes mapped to reporting spend categories.
+    config:
+      column_types:
+        mcc: varchar(4)
+    columns:
+      - name: mcc
+        data_tests: [unique, not_null]
+
+  - name: transaction_types
+    description: Transaction type reference used for categorisation in marts.
+    columns:
+      - name: txn_type
+        data_tests: [unique, not_null]

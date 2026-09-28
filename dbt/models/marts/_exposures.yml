@@ -1,0 +1,21 @@
+exposures:
+  - name: risk_operations_dashboard
+    label: Risk operations dashboard
+    type: dashboard
+    maturity: medium
+    description: Daily AML alert review queue and monthly customer risk trends.
+    depends_on:
+      - ref('rpt_aml_alerts')
+      - ref('rpt_monthly_customer_summary')
+    owner:
+      name: Data Platform
+
+  - name: finance_spend_report
+    label: Monthly card spend report
+    type: analysis
+    maturity: medium
+    description: Monthly card spend by category and market for finance and product teams.
+    depends_on:
+      - ref('rpt_merchant_category_spend')
+    owner:
+      name: Data Platform

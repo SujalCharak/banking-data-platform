@@ -1,0 +1,26 @@
+sources:
+  - name: bank
+    description: Core banking extracts landed as daily CSV files. Every column arrives as text.
+    database: "{{ 'RAW' if target.type == 'snowflake' else target.database }}"
+    schema: "{{ 'BANK' if target.type == 'snowflake' else 'raw' }}"
+    config:
+      loaded_at_field: _loaded_at
+      freshness:
+        warn_after: {count: 26, period: hour}
+        error_after: {count: 50, period: hour}
+    tables:
+      - name: transactions
+        description: Posted, declined and reversed transactions. One file per business day; files can repeat rows and carry late arrivals.
+        columns:
+          - name: txn_id
+            data_tests: [not_null]
+      - name: customers
+        description: Customer change feed. Every change to a customer produces a full row with a new updated_at.
+      - name: accounts
+        description: Account change feed with opening balance at first extract.
+      - name: merchants
+        description: Merchant reference extract.
+        config:
+          freshness: null
+      - name: fx_rates
+        description: Daily reference rates to EUR, published on business days only.
