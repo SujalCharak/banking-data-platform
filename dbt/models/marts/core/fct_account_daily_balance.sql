@@ -1,3 +1,5 @@
+{%- set as_iceberg = target.type == 'snowflake' and var('enable_iceberg') -%}
+
 {{
     config(
         materialized='incremental',
@@ -7,6 +9,10 @@
         cluster_by=['balance_date']
     )
 }}
+
+{%- if as_iceberg %}
+{{ config(table_format='iceberg', external_volume='SNOWFLAKE_MANAGED') }}
+{%- endif %}
 
 {#-
     Balances are a running sum, so a late transaction changes every balance after it.
@@ -135,7 +141,9 @@ select
     b.posted_txn_count,
     b.closing_balance,
     cast(b.closing_balance * fx.rate_to_eur as decimal(18, 2)) as closing_balance_eur,
-    (select max(_loaded_at) from {{ ref('fct_transactions') }}) as source_loaded_through
+    {%- set loaded_through = "(select max(_loaded_at) from " ~ ref('fct_transactions') ~ ")" %}
+    {#- Iceberg stores timestamps to the microsecond -#}
+    {{ "cast(" ~ loaded_through ~ " as timestamp_ltz(6))" if as_iceberg else loaded_through }} as source_loaded_through
 from balances b
 left join {{ ref('int_fx_rates__daily') }} fx
     on fx.currency = b.currency

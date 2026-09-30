@@ -29,6 +29,7 @@ vars:
   aml_outlier_min_amount_eur: 1000
   enable_search_optimization: false
   enable_masking: false
+  enable_iceberg: false
 
 models:
   bank_platform:
