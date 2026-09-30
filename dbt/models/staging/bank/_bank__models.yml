@@ -57,3 +57,10 @@ models:
               arguments:
                 min_value: 0.01
                 max_value: 100
+
+  - name: stg_bank__transactions_stream
+    description: Typed transaction events from Kafka, one row per message.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [_kafka_topic, _kafka_partition, _kafka_offset]

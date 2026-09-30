@@ -90,3 +90,13 @@ def test_raw_ddl_matches_python_schema():
         assert match, entity
         declared = [c.strip().split()[0] for c in match.group(1).split(",") if c.strip()]
         assert declared == columns + ["_source_file", "_source_row", "_loaded_at"], entity
+
+
+def test_stream_ddl_matches_python_schema():
+    from bankdp.schema import STREAM_COLUMNS
+
+    ddl = (ROOT / "snowflake" / "06_streaming.sql").read_text().lower()
+    match = re.search(r"create table if not exists raw\.bank\.transactions_stream \((.*?)\)\s*comment", ddl, re.DOTALL)
+    assert match
+    declared = [c.strip().split()[0] for c in match.group(1).split(",") if c.strip()]
+    assert declared == STREAM_COLUMNS + ["_ingested_at"]

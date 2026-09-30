@@ -1,6 +1,6 @@
 # Banking Data Platform on Snowflake and dbt
 
-A data platform for retail bank transaction data, built on Snowflake and dbt with Python for ingestion, orchestration and validation. It takes messy daily core banking extracts, loads them into Snowflake, and builds tested facts, SCD type 2 dimensions, daily account balances, finance reporting and AML alerts.
+A data platform for retail bank transaction data, built on Snowflake and dbt with Python for ingestion, orchestration and validation. It takes messy daily core banking extracts, loads them into Snowflake, and builds tested facts, SCD type 2 dimensions, daily account balances, finance reporting and AML alerts. A second, real time path streams transactions through Kafka into Snowflake, where large transactions are screened within seconds.
 
 Every dbt model also runs unchanged on DuckDB, so the full pipeline can be built and tested on a laptop or in CI without a Snowflake account.
 
@@ -8,7 +8,11 @@ Every dbt model also runs unchanged on DuckDB, so the full pipeline can be built
 flowchart LR
     G["Daily extracts<br/>(CSV, gzip)"] --> S[("Internal stage<br/>RAW.OPS.LANDING")]
     S -->|"SP_LOAD_LANDING<br/>COPY INTO + audit"| R[("RAW.BANK<br/>text columns + load metadata")]
-    R --> STR["Stream"] --> TSK["Serverless task<br/>large transaction alerts"]
+    P["Producer<br/>(transaction events)"] --> K[["Kafka topic<br/>bank.transactions"]]
+    K -->|"consumer, micro batch COPY<br/>exactly once"| RS[("RAW.BANK<br/>TRANSACTIONS_STREAM")]
+    R --> STR["Stream"] --> TSK["Triggered task<br/>large transaction alerts"]
+    RS --> STR2["Stream"] --> TSK
+    RS --> STG
     R --> STG["dbt staging<br/>typing, cleaning"]
     STG --> INT["dbt intermediate<br/>validation, SCD2, FX fill, AML rules"]
     INT --> CORE["CORE<br/>facts, dims, balances"]
@@ -27,7 +31,7 @@ flowchart LR
   * `COPY INTO` matches columns by header name and records the source file, row number and scan time on every row.
   * When a new column appears mid year, it loads without any code change.
 * **Load procedure:** `SP_LOAD_LANDING` builds the COPY for one entity, writes one audit row per file, and returns a summary. COPY's own load history makes reruns skip files that were already loaded.
-* **Realtime screening:** a stream on the raw transactions table feeds a serverless task, which checks only new rows for large transactions. The task is skipped at no cost when the stream is empty.
+* **Large transaction screening:** streams on the file table and the Kafka table feed one serverless triggered task. It has no schedule: it runs within seconds of new rows on either stream (at most every 10 seconds), checks only those rows, and costs nothing while both are empty.
 * **Reconciliation:** `SP_RECONCILE_TRANSACTIONS` recomputes daily counts and net amounts straight from RAW, using its own parsing. It compares them with the dbt fact table and fails if any day disagrees. A scheduled task runs it every morning.
 * **Security:**
   * Four roles: admin, loader, transformer and analyst.
@@ -35,6 +39,18 @@ flowchart LR
   * A service user that uses key pair auth only.
   * A monthly resource monitor.
   * Optional masking policies for email and IBAN.
+
+### Streaming path with Kafka
+* **Producer:** publishes transaction events to the `bank.transactions` topic, keyed by account ID so each account's events stay in order. It uses an idempotent producer with `acks=all`. For the demo it replays rows from the daily extracts at a set rate, and can corrupt every Nth message on purpose.
+* **Consumer:** lands events in `RAW.BANK.TRANSACTIONS_STREAM` in micro batches (5,000 rows or 5 seconds). Each batch is one gzip file and one `COPY`, so it lands completely or not at all. Business fields stay text, as in the file path, with the Kafka topic, partition, offset and timestamp on every row.
+* **Exactly once landing:** the table, not Kafka, records progress. When the consumer gets partitions, it seeks to the highest offset already landed plus one. A crash between the Snowflake write and the Kafka commit therefore neither duplicates nor skips a message.
+  * Kafka offsets are still committed, and synced to the table on startup, so consumer lag stays accurate.
+  * Partitions being handed to another consumer are landed first; partitions lost to a rebalance have their buffer dropped.
+* **Bad messages:** a message that isn't valid JSON is landed with its raw value and the parse error, and the consumer keeps going.
+* **Latency:** `RAW.OPS.V_STREAM_LATENCY` reports p50 and p95 seconds from the event being produced, to landing in Snowflake, to the alert.
+* **Two paths, compared:** each path alerts a transaction once. `V_STREAM_MISSED_ALERTS` lists anything the file path caught that the stream missed, and the dbt model `dq_stream_vs_batch` compares, day by day, which transactions arrived by stream, by file, or both.
+* **Checks:** `bankdp stream-check` compares the table with the topic's offsets, partition by partition, and fails on any duplicate or gap. CI runs Apache Kafka as a service container and replays a week through it, stopping the consumer mid run as if it crashed before restarting it.
+* **In production** Snowflake's Kafka connector with Snowpipe Streaming would land rows faster and without a warehouse. This consumer makes the delivery guarantees explicit and testable.
 
 ### Transformation in dbt
 * **Staging:**
@@ -63,18 +79,19 @@ flowchart LR
   * A monthly customer summary: income, card spend, external flows, average and month end balance, and spend percentile within segment.
   * Merchant category spend net of reversed payments, with share of month and month over month growth.
 * **Cross database:** macros dispatch timestamp parsing, regex and date functions per adapter, so the same models run on Snowflake and DuckDB.
+* **Apache Iceberg (optional):** with `enable_iceberg`, `fct_account_daily_balance` is built as an Iceberg table on Snowflake storage, clustered and merged incrementally like before. The project overrides one macro in the dbt Snowflake adapter 1.11, which otherwise sends a `BASE_LOCATION` that Snowflake rejects for Snowflake storage ([dbt-adapters#1911](https://github.com/dbt-labs/dbt-adapters/issues/1911)).
 
 ### Testing and validation
 * **dbt tests:**
-  * 69 data tests: built in, custom generic and singular.
-  * 5 unit tests: FX gap fill, SCD2 collapsing, the structuring window, the velocity window across midnight, and duplicate detection when a resent file is scanned before the original.
+  * 74 data tests: built in, custom generic and singular. One of them fails if any Kafka offset lands twice.
+  * 6 unit tests: FX gap fill, SCD2 collapsing, the structuring window, the velocity window across midnight, duplicate detection when a resent file is scanned before the original, and the stream versus file comparison.
 * **Singular tests** check that:
   * every delivered row ends up in exactly one place (the fact table or quarantine);
   * every account's final balance equals its opening balance plus posted movements;
   * reversals match their original payments.
 * **Ground truth:** the generator records every problem it injects, and `bankdp validate` checks the pipeline caught each one.
 * **Incremental check:** `bankdp run-local` loads data in two batches and runs dbt incrementally. It then rebuilds the incremental models from scratch and checks the results are identical, row for row.
-* **pytest** covers generator determinism, loader idempotency, and that the Snowflake DDL matches the Python schema.
+* **pytest** covers generator determinism, loader idempotency, that the Snowflake DDL matches the Python schema, and the consumer's crash, rebalance and bad message handling against a fake Kafka consumer.
 
 ### Performance and cost
 * **Benchmarks:** `snowflake/benchmarks/00_build_benchmark_tables.sql` scales the fact table to about 110M rows. `bankdp benchmark` then runs six experiments with the result cache off and a cold warehouse, reporting time, MB scanned, partitions pruned and estimated credits:
@@ -211,6 +228,13 @@ Then explore the results:
 
 `bankdp run-local --customers 800 --days 120` builds a smaller dataset in under a minute.
 
+To run the streaming path locally, start Kafka with Docker, then replay a few days through it into DuckDB. The command stops the consumer mid run as if it crashed, restarts it, checks every message landed exactly once, and builds the stream models:
+
+```bash
+docker compose up -d
+bankdp stream-run-local --from 2025-12-01 --through 2025-12-03
+```
+
 ## Run it on Snowflake
 
 See [docs/snowflake_runbook.md](docs/snowflake_runbook.md). The short version:
@@ -219,6 +243,7 @@ See [docs/snowflake_runbook.md](docs/snowflake_runbook.md). The short version:
 3. Run `bankdp load-snowflake`.
 4. Run `dbt build --target prod`.
 5. Run `bankdp validate --target snowflake`.
+6. For streaming, run `snowflake/06_streaming.sql`, then `bankdp stream-consume --sink snowflake` and `bankdp stream-produce`.
 
 ## Layout
 
@@ -226,6 +251,8 @@ See [docs/snowflake_runbook.md](docs/snowflake_runbook.md). The short version:
 snowflake/            setup scripts: roles, warehouses, raw layer, procedures, streams, tasks, grants, masking
 snowflake/benchmarks/ 110M row benchmark tables
 src/bankdp/           generator, loaders, CLI, validation, benchmark and cost report
+src/bankdp/streaming/ Kafka producer, exactly once consumer, DuckDB and Snowflake sinks, topic check
+docker-compose.yml    single node Apache Kafka for local runs
 dbt/models/staging/       typed views over raw
 dbt/models/intermediate/  validation, SCD2 history, FX calendar, AML rule hits
 dbt/models/marts/         core, finance, risk, data_quality
@@ -240,7 +267,9 @@ tests/                pytest
 * **Latest version wins.** Merging on `txn_id` means a corrected transaction replaces the earlier one. Incremental runs and a full rebuild give the same answer, and `run-local` checks that on every run.
 * **Separate history paths.** Customer SCD2 comes from the source's own change history, so it's complete even for changes made between runs. The account snapshot shows the other approach, dbt capturing state at run time.
 * **An independent control.** The reconciliation procedure doesn't reuse dbt's logic, so a bug in one side shows up as a mismatch.
+* **One book of record.** The stream is the fast path for alerting; the daily extract stays the source for reporting, because it is complete and reconciled. The stream versus file comparison shows where the two disagree.
 * **Limits.**
   * The data is synthetic.
   * The AML rules show the SQL patterns involved; they are not a compliance system.
-  * The realtime alert compares amounts in account currency, because FX conversion happens downstream in dbt.
+  * The large transaction alert compares amounts in account currency, because FX conversion happens downstream in dbt.
+  * The streaming demo replays historical extract rows, so event times are in the past; latency is measured from when each event was produced to Kafka.

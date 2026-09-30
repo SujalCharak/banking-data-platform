@@ -6,7 +6,7 @@ from pathlib import Path
 
 import duckdb
 
-from bankdp.schema import RAW_COLUMNS
+from bankdp.schema import RAW_COLUMNS, STREAM_BUSINESS_COLUMNS, STREAM_TABLE
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +27,12 @@ def ensure_raw_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(
         "create table if not exists raw.load_audit ("
         "entity varchar, file_name varchar, rows_loaded bigint, status varchar, loaded_at timestamp)"
+    )
+    business = ", ".join(f"{c} varchar" for c in STREAM_BUSINESS_COLUMNS)
+    con.execute(
+        f"create table if not exists raw.{STREAM_TABLE} ({business}, "
+        "_kafka_topic varchar, _kafka_partition integer, _kafka_offset bigint, _kafka_timestamp_ms bigint, "
+        "_raw_value varchar, _parse_error varchar, _ingested_at timestamp)"
     )
 
 

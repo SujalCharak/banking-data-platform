@@ -8,6 +8,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      kafka:
+        image: apache/kafka:4.0.0
+        ports:
+          - 9092:9092
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +41,9 @@ jobs:
 
       - name: Build, check incremental and validate on DuckDB
         run: bankdp run-local --customers 800 --days 120
+
+      - name: Kafka to DuckDB with a consumer crash, exactly once check
+        run: bankdp stream-run-local --from 2025-04-20 --through 2025-04-26
 
       - name: Upload validation report
         if: always()

@@ -21,7 +21,8 @@ snowflake = [
     "dbt-snowflake~=1.11.0",
     "cryptography>=42",
 ]
-dev = ["pytest>=8", "ruff>=0.6"]
+streaming = ["confluent-kafka>=2.6"]
+dev = ["pytest>=8", "ruff>=0.6", "confluent-kafka>=2.6"]
 
 [project.scripts]
 bankdp = "bankdp.cli:main"

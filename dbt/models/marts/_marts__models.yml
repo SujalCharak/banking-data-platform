@@ -153,6 +153,21 @@ models:
       - name: file_date
         data_tests: [not_null]
 
+  - name: dq_stream_vs_batch
+    description: >
+      For each transaction date seen on the Kafka stream, how many transactions arrived by stream, by daily
+      extract, or both. batch_only rows are usually transactions the source delivered late, after the replayed files.
+    columns:
+      - name: txn_date
+        data_tests: [unique, not_null]
+      - name: stream_only
+        data_tests:
+          - within_range:
+              arguments:
+                max_value: 0
+              config:
+                severity: warn
+
 unit_tests:
   - name: resent_copy_scanned_first_is_still_the_duplicate
     description: On Snowflake files in one COPY get their own scan times, so a resent copy can have an earlier _loaded_at than the original.
@@ -166,3 +181,20 @@ unit_tests:
       rows:
         - {source_file: transactions/transactions_20250102.csv.gz, duplicate_rows: 0, late_arriving_rows: 0}
         - {source_file: transactions/transactions_20250103.csv.gz, duplicate_rows: 1, late_arriving_rows: 0}
+
+  - name: stream_and_batch_are_compared_only_on_streamed_days
+    model: dq_stream_vs_batch
+    given:
+      - input: ref('stg_bank__transactions_stream')
+        rows:
+          - {txn_id: T1, txn_ts: "2025-12-01 09:00:00"}
+          - {txn_id: T2, txn_ts: "2025-12-01 10:00:00"}
+          - {txn_id: T2, txn_ts: "2025-12-01 10:00:00"}
+      - input: ref('stg_bank__transactions')
+        rows:
+          - {txn_id: T1, txn_ts: "2025-12-01 09:00:00"}
+          - {txn_id: T3, txn_ts: "2025-12-01 11:00:00"}
+          - {txn_id: T4, txn_ts: "2025-12-02 08:00:00"}
+    expect:
+      rows:
+        - {txn_date: 2025-12-01, streamed_txns: 2, batch_txns: 2, in_both: 1, stream_only: 1, batch_only: 1}

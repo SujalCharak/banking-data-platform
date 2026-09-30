@@ -45,3 +45,10 @@ RAW_COLUMNS = {
 }
 
 METADATA_COLUMNS = ["_source_file", "_source_row", "_loaded_at"]
+
+# Columns landed from Kafka. Business fields stay text, like the file path; the rest locate each message exactly.
+STREAM_TABLE = "transactions_stream"
+STREAM_BUSINESS_COLUMNS = RAW_COLUMNS["transactions"]
+STREAM_KAFKA_COLUMNS = ["_kafka_topic", "_kafka_partition", "_kafka_offset", "_kafka_timestamp_ms"]
+STREAM_ERROR_COLUMNS = ["_raw_value", "_parse_error"]
+STREAM_COLUMNS = STREAM_BUSINESS_COLUMNS + STREAM_KAFKA_COLUMNS + STREAM_ERROR_COLUMNS

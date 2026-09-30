@@ -24,3 +24,13 @@ sources:
           freshness: null
       - name: fx_rates
         description: Daily reference rates to EUR, published on business days only.
+      - name: transactions_stream
+        description: >
+          Transaction events landed from the Kafka topic bank.transactions. Business fields arrive as text,
+          exactly as in the daily extract; Kafka partition and offset identify each message.
+        config:
+          loaded_at_field: _ingested_at
+          freshness: null
+        columns:
+          - name: _kafka_offset
+            data_tests: [not_null]
